@@ -1,0 +1,41 @@
+{
+  "cpa_targets": {
+    "T1": 1.6,
+    "T2": 1.0,
+    "T3": 0.85,
+    "T4": 0.6
+  },
+  "observation_window": {
+    "days": 7
+  },
+  "data_settling_lag": {
+    "days": 2
+  },
+  "cooldown_days": {
+    "days": 9
+  },
+  "bid_movement": {
+    "max_fraction": 0.2
+  },
+  "tolerance_band": {
+    "percent_of_target": 0.04
+  },
+  "core_campaign_wasted_spend_pause_threshold": {
+    "gbp": 20.0
+  },
+  "discovery_graduation": {
+    "min_installs_over_window": 15
+  },
+  "discovery_negativize_threshold": {
+    "campaign_spend_share": 0.15
+  },
+  "discovery_pause_grace_period": {
+    "calendar_days": 28
+  },
+  "budget_allocation": {
+    "brand": 0.12,
+    "competitor": 0.23,
+    "generic": 0.4,
+    "discovery": 0.25
+  }
+}
