@@ -400,6 +400,34 @@ def check_6_scale(audit_df, keywords_df, raw_data):
     return result
 
 
+def check_7_keyword_text_stability(audit_df):
+    """
+    Check 7: Keyword text stability
+    For each entity_id (keyword_id), verify keyword_text is constant across all rows.
+    Each unique keyword should have exactly ONE keyword_text.
+    """
+    result = VerificationResult(7, "Keyword Text Stability")
+
+    # Group by entity_id and count unique keyword_texts
+    entity_text_counts = audit_df.groupby("entity_id")["keyword_text"].nunique()
+
+    unstable_keywords = entity_text_counts[entity_text_counts > 1]
+
+    result.add_detail(f"Total unique keywords: {len(entity_text_counts)}")
+    result.add_detail(f"Keywords with multiple texts: {len(unstable_keywords)}")
+
+    if len(unstable_keywords) > 0:
+        result.fail(f"{len(unstable_keywords)} keywords have multiple different texts")
+        # Show examples
+        for entity_id in list(unstable_keywords.index)[:3]:
+            texts = audit_df[audit_df["entity_id"] == entity_id]["keyword_text"].unique()
+            result.add_detail(f"  entity_id {entity_id}: {len(texts)} different texts ({list(texts)[:2]}...)")
+    else:
+        result.add_detail("✓ All keywords have exactly one stable text across all 90 days")
+
+    return result
+
+
 def main():
     """Run all verification checks."""
     print("\n" + "=" * 90)
@@ -441,6 +469,10 @@ def main():
 
         print("Running Check 6: Scale")
         results.append(check_6_scale(audit_df, keywords_df, raw_data))
+        print()
+
+        print("Running Check 7: Keyword Text Stability")
+        results.append(check_7_keyword_text_stability(audit_df))
         print()
 
         # Print results
