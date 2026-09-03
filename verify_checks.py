@@ -428,6 +428,56 @@ def check_7_keyword_text_stability(audit_df):
     return result
 
 
+def check_8_seven_day_window_enforcement(audit_df):
+    """
+    Check 8: Seven-day settled window enforcement
+    Verify that no keyword takes a real action (bid_increase, bid_decrease, pause,
+    graduate, negativize) until it has completed at least 7 full settled calendar days
+    in its trailing observation window.
+
+    Expected: First action should occur on day 9 or later (day 9 = 2026-06-11).
+    """
+    result = VerificationResult(8, "Seven-Day Window Enforcement")
+
+    # Define non-trivial actions
+    action_types = {'bid_increase', 'bid_decrease', 'pause', 'graduate', 'negativize'}
+
+    # Find first action for each keyword
+    audit_df['date'] = pd.to_datetime(audit_df['date'])
+
+    keyword_first_action = {}
+    for entity_id in audit_df['entity_id'].unique():
+        entity_rows = audit_df[audit_df['entity_id'] == entity_id].sort_values('date')
+        actions = entity_rows[entity_rows['action_type'].isin(action_types)]
+        if len(actions) > 0:
+            first_action_date = actions.iloc[0]['date']
+            keyword_first_action[entity_id] = first_action_date
+
+    result.add_detail(f"Total keywords: {audit_df['entity_id'].nunique()}")
+    result.add_detail(f"Keywords with actions: {len(keyword_first_action)}")
+
+    # Check if any took action before day 9 (2026-06-11)
+    simulation_start = pd.to_datetime('2026-06-03')
+    day_9_date = pd.to_datetime('2026-06-11')
+
+    premature_actions = {}
+    for entity_id, first_date in keyword_first_action.items():
+        if first_date < day_9_date:
+            days_elapsed = (first_date - simulation_start).days + 1
+            premature_actions[entity_id] = (first_date, days_elapsed)
+
+    if len(premature_actions) > 0:
+        result.fail(f"{len(premature_actions)} keywords took actions before 7-day window")
+        for entity_id, (date, days) in list(premature_actions.items())[:3]:
+            result.add_detail(f"  entity {entity_id}: action on day {days} ({date.date()})")
+    else:
+        result.add_detail(f"✓ All {len(keyword_first_action)} keywords waited for 7-day window")
+        first_action_date = min(keyword_first_action.values())
+        result.add_detail(f"  First action: day 9 ({first_action_date.date()})")
+
+    return result
+
+
 def main():
     """Run all verification checks."""
     print("\n" + "=" * 90)
@@ -473,6 +523,10 @@ def main():
 
         print("Running Check 7: Keyword Text Stability")
         results.append(check_7_keyword_text_stability(audit_df))
+        print()
+
+        print("Running Check 8: Seven-Day Window Enforcement")
+        results.append(check_8_seven_day_window_enforcement(audit_df))
         print()
 
         # Print results

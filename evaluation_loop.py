@@ -114,14 +114,15 @@ class EvaluationLoop:
 
             # For this date, compute windowed metrics for all keywords
             for campaign_id, keyword_id in self.unique_keywords:
-                spend, installs, cpa = self._compute_windowed_cpa(
+                spend, installs, cpa, settled_days = self._compute_windowed_cpa(
                     campaign_id, keyword_id, current
                 )
                 key = (campaign_id, keyword_id, date_str)
                 self.windowed_metrics[key] = {
                     'spend': spend,
                     'installs': installs,
-                    'cpa': cpa
+                    'cpa': cpa,
+                    'settled_days': settled_days
                 }
 
             current += timedelta(days=1)
@@ -130,14 +131,16 @@ class EvaluationLoop:
         """
         Compute aggregated CPA for a 7-day window ending at (evaluation_date - 2 days).
 
-        Returns (total_spend, total_installs, windowed_cpa).
+        Returns (total_spend, total_installs, windowed_cpa, settled_days_count).
         windowed_cpa is None if total_installs == 0.
+        settled_days_count is the number of calendar days in the window with settled data.
         """
         window_end = evaluation_date - timedelta(days=self.settling_lag)
         window_start = window_end - timedelta(days=self.observation_window - 1)
 
         total_spend = 0.0
         total_installs = 0
+        settled_days_count = 0
 
         current = window_start
         while current <= window_end:
@@ -149,6 +152,7 @@ class EvaluationLoop:
                 if kw.get('data_maturity') == 'settled':
                     total_spend += kw.get('spend', 0.0)
                     total_installs += kw.get('installs', 0)
+                    settled_days_count += 1
 
             current += timedelta(days=1)
 
@@ -156,7 +160,7 @@ class EvaluationLoop:
         if total_installs > 0:
             windowed_cpa = total_spend / total_installs
 
-        return total_spend, total_installs, windowed_cpa
+        return total_spend, total_installs, windowed_cpa, settled_days_count
 
     def _get_campaign_windowed_spend(self, campaign_id, evaluation_date):
         """Get total windowed spend for a campaign."""
@@ -195,6 +199,7 @@ class EvaluationLoop:
                 spend = metrics.get('spend', 0.0)
                 installs = metrics.get('installs', 0)
                 windowed_cpa = metrics.get('cpa', None)
+                settled_days = metrics.get('settled_days', 0)
 
                 # Check if entity is on cooldown
                 cooldown_until = self.cooldowns[(campaign_id, keyword_id)]
@@ -203,7 +208,7 @@ class EvaluationLoop:
                 # Determine action and reason
                 action, reason = self._decide_action(
                     campaign_type, windowed_cpa, target_cpa, spend, installs,
-                    campaign_id, keyword_id, day_date, tier, campaign
+                    campaign_id, keyword_id, day_date, tier, campaign, settled_days
                 )
 
                 # Check guardrails
@@ -277,18 +282,18 @@ class EvaluationLoop:
         return abs(cpa - target_cpa) <= band
 
     def _decide_action(self, campaign_type, windowed_cpa, target_cpa, spend, installs,
-                      campaign_id, keyword_id, day_date, tier, campaign) -> Tuple[str, str]:
+                      campaign_id, keyword_id, day_date, tier, campaign, settled_days) -> Tuple[str, str]:
         """Determine the action for this entity."""
 
         if campaign_type in ['brand', 'competitor', 'generic']:
-            return self._decide_core_campaign(windowed_cpa, target_cpa, spend, installs)
+            return self._decide_core_campaign(windowed_cpa, target_cpa, spend, installs, settled_days)
         elif campaign_type == 'discovery':
             return self._decide_discovery(campaign_id, keyword_id, windowed_cpa, target_cpa,
-                                         spend, installs, day_date, campaign)
+                                         spend, installs, day_date, campaign, settled_days)
         else:
             return 'no_action', 'unknown_campaign_type'
 
-    def _decide_core_campaign(self, windowed_cpa, target_cpa, spend, installs) -> Tuple[str, str]:
+    def _decide_core_campaign(self, windowed_cpa, target_cpa, spend, installs, settled_days) -> Tuple[str, str]:
         """Decision logic for Brand/Competitor/Generic campaigns."""
 
         # Wasted spend pause
@@ -298,6 +303,10 @@ class EvaluationLoop:
         # No data
         if windowed_cpa is None:
             return 'no_action', 'no_data_in_window'
+
+        # Insufficient window (require 7 settled days before any action)
+        if settled_days < self.observation_window:
+            return 'no_action', f'insufficient_window ({settled_days} of {self.observation_window} settled days)'
 
         # Tolerance band
         if self._within_tolerance(windowed_cpa, target_cpa):
@@ -314,8 +323,12 @@ class EvaluationLoop:
         return 'no_action', 'unknown_condition'
 
     def _decide_discovery(self, campaign_id, keyword_id, windowed_cpa, target_cpa,
-                         spend, installs, day_date, campaign) -> Tuple[str, str]:
+                         spend, installs, day_date, campaign, settled_days) -> Tuple[str, str]:
         """Decision logic for Discovery campaigns."""
+
+        # Insufficient window (require 7 settled days before graduation/negativize)
+        if settled_days < self.observation_window:
+            return 'no_action', f'insufficient_window ({settled_days} of {self.observation_window} settled days)'
 
         # Within or below target
         if windowed_cpa is not None and windowed_cpa <= target_cpa:
